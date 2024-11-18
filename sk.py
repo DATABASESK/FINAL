@@ -5,7 +5,7 @@ import re
 from github import Github  # Install using `pip install PyGithub`
 
 # GitHub configuration
-GITHUB_TOKEN = "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"
+GITHUB_TOKEN = "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"
 REPO_NAME = "DATABASESK/FINAL"
 DB_JSON_PATH = "db.json"
 
