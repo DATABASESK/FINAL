@@ -26,6 +26,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4 PyGithub
 
-      # Step 4: Run the Python script
+      # Step 4: Run your Python script
       - name: Run script
         run: python sk.py
