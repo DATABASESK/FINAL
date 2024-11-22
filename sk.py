@@ -2,12 +2,6 @@ import requests
 from bs4 import BeautifulSoup
 import json
 import re
-from github import Github  # Install using `pip install PyGithub`
-
-# GitHub configuration
-GITHUB_TOKEN = "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"
-REPO_NAME = "DATABASESK/FINAL"
-DB_JSON_PATH = "db.json"
 
 # Base URLs for different movie genres
 urls = {
@@ -17,12 +11,12 @@ urls = {
     'netflix': 'https://0gomovies.mov/genre/watch-tamil-movies/'  # Adjust as per your requirement
 }
 
-# Function to scrape data for a given genre URL
+# Function to scrape data for a given genre URL (First Script)
 def scrape_data(base_url, genre):
     poster_links = []
     movie_links = []
     page_number = 1
-    max_pages = 50
+    max_pages = 1  # Limiting to 2 pages for demo purposes
 
     while page_number <= max_pages:
         if page_number == 5:
@@ -61,7 +55,7 @@ def scrape_data(base_url, genre):
 
     return poster_links, movie_links
 
-# Function to fetch movie details from the movie links
+# Function to fetch movie details from the movie links (First Script)
 def fetch_movie_details(movie_links, poster_links):
     movie_details = []
 
@@ -112,61 +106,97 @@ def fetch_movie_details(movie_links, poster_links):
 
     return movie_details
 
-# Function to fetch and merge movie data with existing JSON
-def merge_data(existing_data, new_data, genre):
-    if genre not in existing_data:
-        existing_data[genre] = []
-    existing_names = {movie['name'] for movie in existing_data[genre]}
-    for movie in new_data:
-        if movie['name'] not in existing_names:
-            existing_data[genre].append(movie)
+# Function to fetch movie details from the second script (Netflix section)
+def fetch_movies(base_url, pages):
+    movie_details = []
+    for page in range(1, pages + 1):
+        url = f"{base_url}/page/{page}/"
+        response = requests.get(url)
 
-# Function to update the db.json file on GitHub
-def update_github_db(json_data):
-    g = Github(GITHUB_TOKEN)
-    repo = g.get_repo(REPO_NAME)
+        if response.status_code != 200:
+            print(f"Failed to retrieve page {page}. Status code: {response.status_code}")
+            continue
 
-    try:
-        # Get the current file content
-        contents = repo.get_contents(DB_JSON_PATH)
-        repo.update_file(
-            path=DB_JSON_PATH,
-            message="Updated db.json with new movie data",
-            content=json.dumps(json_data, indent=4),
-            sha=contents.sha
-        )
-        print("db.json successfully updated on GitHub.")
-    except Exception as e:
-        print("Error updating db.json:", e)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        movie_links = soup.find_all('a', class_='ml-mask')
 
-# Main function
+        for link in movie_links:
+            title = link.get('title', '')
+            image_tag = link.find('img', class_='thumb mli-thumb lazy')
+
+            if image_tag:
+                image_src = image_tag.get('data-original', '')
+                next_link = link.get('href', '')
+                next_url = f"{next_link[:-1]}/watching/" if next_link.endswith('/') else f"{next_link}/watching/"
+
+                movie_details.append({
+                    'title': title,
+                    'image': image_src,
+                    'next_link': next_url
+                })
+
+    return movie_details
+
+def fetch_links(url):
+    response = requests.get(url)
+    html_content = response.text
+    pattern = r'https://18rule\.com/\d+'
+    matches = re.findall(pattern, html_content)
+    return matches
+
+def fetch_video_links(second_link):
+    response = requests.get(second_link)
+    html_content = response.text
+    soup = BeautifulSoup(html_content, 'html.parser')
+
+    video_links = []
+    for a in soup.find_all('a', href=True):
+        if 'link.php?link=' in a['href']:
+            title = a.get_text(strip=True)
+            link = a['href'].replace('https://lesmandalas.net/link.php?link=', '')
+            link = link.replace('https://cdn.bewab.co/', 'https://videooo.news/')
+            video_links.append({'title': title, 'link': link})
+
+    video_links.sort(key=lambda x: int(re.search(r'(\d+)', x['title']).group()))
+    return video_links
+
+# Main function to fetch and combine all movie details
 def main():
-    try:
-        # Fetch existing db.json from GitHub
-        g = Github(GITHUB_TOKEN)
-        repo = g.get_repo(REPO_NAME)
-        contents = repo.get_contents(DB_JSON_PATH)
-        existing_data = json.loads(contents.decoded_content.decode())
+    final_data = {
+        'hollywood': [],
+        'multi': [],
+        'tamil': [],
+        'netflix': []
+    }
 
-    except Exception as e:
-        print("Error fetching existing db.json from GitHub. Creating new file.")
-        existing_data = {}
-
-    # Fetch new data and merge with existing data
+    # Fetch data for each genre (First Script)
     for genre, base_url in urls.items():
-        print(f"Fetching data for {genre}")
         if genre in ['hollywood', 'multi', 'tamil']:
             poster_links, movie_links = scrape_data(base_url, genre)
-            new_data = fetch_movie_details(movie_links, poster_links)
-            merge_data(existing_data, new_data, genre)
+            genre_data = fetch_movie_details(movie_links, poster_links)
+            final_data[genre].extend(genre_data)
 
-    # Save updated data locally and on GitHub
+        # Fetch Netflix data (Second Script)
+        if genre == 'netflix':
+            movies = fetch_movies(base_url, 56)
+            for movie in movies:
+                video_links = fetch_links(movie['next_link'])
+                if len(video_links) < 2:
+                    print(f"Not enough links found for {movie['title']}.")
+                    continue
+                second_link = video_links[1]
+                videos = fetch_video_links(second_link)
+                final_data['netflix'].append({
+                    "name": movie['title'],
+                    "uri": movie['image'],
+                    "videos": videos
+                })
+
+    # Save the final data to db.json
     with open('db.json', 'w') as json_file:
-        json.dump(existing_data, json_file, indent=4)
-    print("Local db.json updated.")
+        json.dump(final_data, json_file, indent=4)
 
-    # Update db.json on GitHub
-    update_github_db(existing_data)
+    print("Data successfully written to db.json")
 
 if __name__ == '__main__':
     main()
